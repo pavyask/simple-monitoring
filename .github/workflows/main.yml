@@ -1,0 +1,82 @@
+name: Check API and Notify Twice Per Day
+
+on:
+  schedule:
+    - cron: "*/1 * * * *"  # Runs every minute
+  workflow_dispatch:        # Manual trigger
+
+jobs:
+  check-endpoint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Check API Response
+        id: check
+        run: |
+          RESPONSE=$(curl -s https://rezerwacja.gdansk.uw.gov.pl:8445/qmaticwebbooking/rest/schedule/branches/1cf1e3e60eeb96dae2bb572487249bd48cc5bed0024960eaee0c893ce4918569/dates;servicePublicId=2c5251d564aaf0b09c2a39d69cf7ed4cb1e142ab3a501b4b688e1e7c2d80b8e0;customSlotLength=40)
+          LENGTH=$(echo "$RESPONSE" | jq 'length')
+
+          echo "Array length: $LENGTH"
+          echo "length=$LENGTH" >> $GITHUB_OUTPUT
+          echo "full_response=$RESPONSE" >> $GITHUB_OUTPUT
+
+      - name: Determine if email can be sent
+        id: email-check
+        run: |
+          TODAY=$(date +%Y-%m-%d)
+          EMAIL_FILE="last_email.txt"
+
+          # Create file if it doesn't exist
+          if [ ! -f $EMAIL_FILE ]; then
+            echo "$TODAY 0" > $EMAIL_FILE
+          fi
+
+          # Read current data
+          read LAST_DATE COUNT < $EMAIL_FILE
+
+          # Reset count if it's a new day
+          if [ "$LAST_DATE" != "$TODAY" ]; then
+            COUNT=0
+          fi
+
+          echo "today=$TODAY" >> $GITHUB_OUTPUT
+          echo "last_date=$LAST_DATE" >> $GITHUB_OUTPUT
+          echo "email_count=$COUNT" >> $GITHUB_OUTPUT
+
+      - name: Send email if allowed
+        if: steps.check.outputs.length != '0' && steps.email-check.outputs.email_count < 2
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          from: "GitHub Action <${{ secrets.EMAIL_USERNAME }}>"
+          to: ${{ secrets.EMAIL_USERNAME }}
+          subject: "⚠️ Non-empty API Response"
+          body: |
+            The API returned a non-empty array.
+            Array length: ${{ steps.check.outputs.length }}
+
+            Full response:
+            ${{ steps.check.outputs.full_response }}
+
+      - name: Update last email count
+        if: steps.check.outputs.length != '0' && steps.email-check.outputs.email_count < 2
+        run: |
+          TODAY=${{ steps.email-check.outputs.today }}
+          COUNT=$((${steps.email-check.outputs.email_count}+1))
+          echo "$TODAY $COUNT" > last_email.txt
+
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add last_email.txt
+          git commit -m "Update last email count"
+          git push
