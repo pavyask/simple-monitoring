@@ -5,6 +5,9 @@ on:
     - cron: "*/1 * * * *"  # Runs every minute
   workflow_dispatch:        # Manual trigger
 
+permissions:
+  contents: write  # <--- this line allows push to repo
+
 jobs:
   check-endpoint:
     runs-on: ubuntu-latest
