@@ -27,6 +27,10 @@ jobs:
           HASH=$(echo "$NORMALIZED" | sha256sum | awk '{print $1}')
           LENGTH=$(echo "$NORMALIZED" | jq 'length' 2>/dev/null || echo 0)
 
+          echo "Hash: $HASH"
+          echo "Length: $LENGTH"
+          echo "Response: $RESPONSE"
+
           echo "hash=$HASH" >> $GITHUB_OUTPUT
           echo "response=$RESPONSE" >> $GITHUB_OUTPUT
           echo "length=$LENGTH" >> $GITHUB_OUTPUT
