@@ -2,7 +2,7 @@ name: Check API and Notify on Change
 
 on:
   schedule:
-    - cron: ${{ secrets.CRON_SCHEDULE }}
+    - cron: "*/5 * * * *"   # every 5 minutes
   workflow_dispatch:        # Manual trigger
 
 permissions:
@@ -16,14 +16,13 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: sudo apt-get install -y jq
-
       - name: Check API Response and Compute Hash
         id: check
         run: |
-          RESPONSE=$(curl -s -k "${{ secrets.API_URL }}")
-          NORMALIZED=${RESPONSE:-null}
+          RESPONSE=$(curl -s -k "${{ vars.API_URL }}")
+          # Trim whitespace and fallback to 'null'
+          NORMALIZED=$(echo "$RESPONSE" | jq -c '.' 2>/dev/null || echo "null")
+          
           HASH=$(echo "$NORMALIZED" | sha256sum | awk '{print $1}')
           LENGTH=$(echo "$NORMALIZED" | jq 'length' 2>/dev/null || echo 0)
 
