@@ -1,12 +1,12 @@
-name: Check API and Notify Twice Per Day
+name: Check API and Notify on Change
 
 on:
   schedule:
-    - cron: "*/1 * * * *"  # Runs every minute
+    - cron: "*/1 * * * *"  # Every minute
   workflow_dispatch:        # Manual trigger
 
 permissions:
-  contents: write  # <--- this line allows push to repo
+  contents: write  # needed to push updated hash file
 
 jobs:
   check-endpoint:
@@ -14,51 +14,39 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Install jq
+      - name: Install dependencies
         run: sudo apt-get install -y jq
 
-      - name: Check API Response
+      - name: Check API Response and Compute Hash
         id: check
         run: |
           RESPONSE=$(curl -s -k "https://rezerwacja.gdansk.uw.gov.pl:8445/qmaticwebbooking/rest/schedule/branches/1cf1e3e60eeb96dae2bb572487249bd48cc5bed0024960eaee0c893ce4918569/dates;servicePublicId=2c5251d564aaf0b09c2a39d69cf7ed4cb1e142ab3a501b4b688e1e7c2d80b8e0;customSlotLength=40")
+          NORMALIZED=${RESPONSE:-null}
+          HASH=$(echo "$NORMALIZED" | sha256sum | awk '{print $1}')
+          LENGTH=$(echo "$NORMALIZED" | jq 'length' 2>/dev/null || echo 0)
 
-          NUM_ITEMS=$(echo "$RESPONSE" | jq 'length' 2>/dev/null || echo 0)
-          
-          # Get the number of characters
-          LENGTH=${#TRIMMED}
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          echo "length=$LENGTH" >> $GITHUB_OUTPUT
 
-          echo "Resposne: $RESPONSE"
-          echo "Number of items in array: $NUM_ITEMS"
-          echo "length=$NUM_ITEMS" >> $GITHUB_OUTPUT
-          echo "full_response=$RESPONSE" >> $GITHUB_OUTPUT
-
-      - name: Determine if email can be sent
-        id: email-check
+      - name: Compare with previous hash
+        id: compare
         run: |
-          TODAY=$(date +%Y-%m-%d)
-          EMAIL_FILE="last_email.txt"
-
-          # Create file if it doesn't exist
-          if [ ! -f $EMAIL_FILE ]; then
-            echo "$TODAY 0" > $EMAIL_FILE
+          HASH_FILE="last_hash.txt"
+          PREV_HASH=""
+          [ -f "$HASH_FILE" ] && PREV_HASH=$(cat "$HASH_FILE")
+          echo "Previous hash: $PREV_HASH"
+          echo "Current hash: ${{ steps.check.outputs.hash }}"
+          if [ "$PREV_HASH" != "${{ steps.check.outputs.hash }}" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-          # Read current data
-          read LAST_DATE COUNT < $EMAIL_FILE
-
-          # Reset count if it's a new day
-          if [ "$LAST_DATE" != "$TODAY" ]; then
-            COUNT=0
-          fi
-
-          echo "today=$TODAY" >> $GITHUB_OUTPUT
-          echo "last_date=$LAST_DATE" >> $GITHUB_OUTPUT
-          echo "email_count=$COUNT" >> $GITHUB_OUTPUT
-
-      - name: Send email if allowed
-        if: steps.check.outputs.length != '0' && steps.email-check.outputs.email_count < 2
+      - name: Send email if response changed
+        if: steps.compare.outputs.changed == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -68,23 +56,22 @@ jobs:
           password: ${{ secrets.EMAIL_PASSWORD }}
           from: "GitHub Action <${{ secrets.EMAIL_USERNAME }}>"
           to: ${{ secrets.EMAIL_USERNAME }}
-          subject: "⚠️ Non-empty API Response"
+          subject: "⚠️ API Response Changed"
           body: |
-            The API returned a non-empty array.
-            Array length: ${{ steps.check.outputs.length }}
+            The API response has changed.
+
+            ➤ Array length: ${{ steps.check.outputs.length }}
+            ➤ New hash: ${{ steps.check.outputs.hash }}
 
             Full response:
-            ${{ steps.check.outputs.full_response }}
+            ${{ steps.check.outputs.response }}
 
-      - name: Update last email count
-        if: steps.check.outputs.length != '0' && steps.email-check.outputs.email_count < 2
+      - name: Update stored hash
+        if: steps.compare.outputs.changed == 'true'
         run: |
-          TODAY="${{ steps.email-check.outputs.today }}"
-          COUNT=$(( ${{ steps.email-check.outputs.email_count }} + 1 ))
-          echo "$TODAY $COUNT" > last_email.txt
-      
+          echo "${{ steps.check.outputs.hash }}" > last_hash.txt
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          git add last_email.txt
-          git commit -m "Update last email count"
+          git add last_hash.txt
+          git diff --cached --quiet || git commit -m "Update hash"
           git push
