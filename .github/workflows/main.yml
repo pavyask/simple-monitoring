@@ -2,7 +2,7 @@ name: Check API and Notify on Change
 
 on:
   schedule:
-    - cron: "*/1 * * * *"  # Every minute
+    - cron: "*/5 * * * *"  # Every minute
   workflow_dispatch:        # Manual trigger
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - name: Check API Response and Compute Hash
         id: check
         run: |
-          RESPONSE=$(curl -s -k "${{ secrets.EMAIL_USERNAME }}")
+          RESPONSE=$(curl -s -k "${{ secrets.API_URL }}")
           NORMALIZED=${RESPONSE:-null}
           HASH=$(echo "$NORMALIZED" | sha256sum | awk '{print $1}')
           LENGTH=$(echo "$NORMALIZED" | jq 'length' 2>/dev/null || echo 0)
