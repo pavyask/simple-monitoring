@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   check-endpoint:
-    runs-on: [self-hosted, github-runner]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repo
